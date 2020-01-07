@@ -1,3 +1,9 @@
+#---
+#title: "IEEE-CIS Fraud Detection EDA and XGBoost Modelling"
+#author: "Teo Yu Xuan"
+#date: "Jan 2020"
+#---
+
 #import libraries
 
 library(ggplot2)
@@ -7,6 +13,10 @@ library(readr)
 library(tidyverse)
 library(dplyr)
 library(scales)
+library(caTools)
+library(mice)
+library(DMwR)
+library(caret)
 library(xgboost)
 library(e1071)
 library(tictoc)
@@ -84,14 +94,18 @@ ggplot(train,aes(x = factor(P_emaildomain),fill=isFraud))+geom_bar()+coord_flip(
 ggplot(train,aes(x = factor(R_emaildomain),fill=isFraud))+geom_bar()+coord_flip()
 #returns a high percentage of NA, as there are lots of blanks under this variable 
 
+#DeviceType
+
+ggplot(train) + geom_mosaic(aes(x=product(DeviceType), fill=factor(isFraud))) + scale_fill_tableau() + theme_bw() + labs(fill='isFraud') + ggtitle("Mosaic Plot of Device Type") + coord_flip()
+#Fraud cases are more likely to happen if it is a case of a mobile user
+
+
 
 ## Data Preparation
 
 #Variables with large missing data can act as noise in the model. Therefore, removing these variables may lead to a more accurate model. 
 
-
 missing_train <- sort(colSums(is.na(train))[colSums(is.na(train)) > 0], decreasing=TRUE)
-
 missing_test <- sort(colSums(is.na(test))[colSums(is.na(test)) > 0], decreasing=TRUE)
 
 ## Ratio of missing variables
@@ -103,7 +117,6 @@ missing_test_pct <- round(missing_test/nrow(test), 2)
 
 # drop variable with more than 50% missing values
 drop_col_train <- names(missing_train_pct[missing_train_pct > 0.5])
-
 drop_col_test <- names(missing_test_pct[missing_test_pct > 0.5])
 
 all(drop_col_test %in% drop_col_train) #TRUE
@@ -113,13 +126,47 @@ drop_col <- intersect(drop_col_test,drop_col_train)
 train[,drop_col] <- NULL
 test[,drop_col] <- NULL
 
+is.na(train) <- train == "NULL"
+
+
+
+## Evaulation metrics
+# Due to the target variable being heavily imbalanced, we'll have to resample to train for a better model instead on solely focusing on accuracy. 
+# The sampling method ROSE is used to deal with the class imbalance problem. 
+# data partitioning to train/eval datasets. We'll do a 80/20 spilt
+
+set.seed(420)
+sample = sample.split(train$isFraud, SplitRatio = .8)
+train_train = subset(train, sample == TRUE)
+train_eval = subset(train, sample == FALSE)
+
+train_mice <- mice(train_train,m=5,maxit=50,meth='cart',seed=420)
+set.seed(420)
+smote_train <- SMOTE(isFraud~. , as.matrix(train_mice), perc.over=100)
+
+#prediction on evaluation to get F1 data 
+
+final_smote <- data.frame(actual = train_eval$isFraud, predict(smote_train, newdata = train_eval, type = "prob"))
+final_smote$predict <- ifelse(final_smote$isFraud > 0.5, "1", "0")
+
+precision <- posPredValue(as.factor(final_smote$predict),as.factor(train_eval$isFraud), positive="1")
+recall <- sensitivity(as.factor(final_smote$predict),as.factor(train_eval$isFraud), positive="1")
+
+F1_score <- 2*((precision*recall)/(precision+recall)) #F1 score
+
 
 
 ## Modelling 
 # I have chosen to use XGBoost as it has high predictive power after tuning. 
 
-x_train <-  train %>% select(-isFraud, -TransactionID)
-y_train <- train$isFraud
+#SMOTE on full training set 
+
+ftrain_mice <- mice(train,m=5,maxit=50,meth='cart',seed=420)
+set.seed(420)
+smote_ftrain <- SMOTE(isFraud~. , as.matrix(ftrain_mice), perc.over=100)
+
+x_train <-  smote_ftrain %>% select(-isFraud, -TransactionID)
+y_train <- smote_ftrain$isFraud
 x_test <- test %>% select(-TransactionID)
 
 
