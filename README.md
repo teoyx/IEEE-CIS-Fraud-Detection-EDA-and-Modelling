@@ -11,6 +11,7 @@ Code tested with R 3.6.1 running on RStudio Version 1.2.1335
 
 # Author
 Teo Yu Xuan, Nanyang Technological University, Nanyang Business School (Double Degree in Accountancy & Business), Undergraduate Year 1
+
 LinkedIn: https://www.linkedin.com/in/teoyuxuan
 
 
